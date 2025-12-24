@@ -21,9 +21,10 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu';
+import { Checkbox } from '@/components/ui/checkbox';
 
 interface Teacher { id: string; name: string; username: string; password: string; subject: string; }
-interface Class { id: string; name: string; grade: string; teacherId: string; teacherName: string; secondaryTeacherId?: string; secondaryTeacherName?: string; }
+interface Class { id: string; name: string; grade: string; teacherId: string; teacherName: string; secondaryTeachers?: { id: string; name: string }[]; }
 interface Student { id: string; name: string; username: string; password: string; classId: string; className: string; }
 interface Announcement { id: string; title: string; content: string; priority: 'normal' | 'important' | 'urgent'; createdAt: string; author: string; }
 
@@ -41,8 +42,8 @@ const AdminDashboard = forwardRef<HTMLDivElement, AdminDashboardProps>(({ curren
   const [newStudent, setNewStudent] = useState({ name: '', username: '', password: '', classId: '' });
   const [newAnnouncement, setNewAnnouncement] = useState({ title: '', content: '', priority: 'normal' as const });
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
-  const [manageClass, setManageClass] = useState({ name: '', grade: '', teacherId: '', secondaryTeacherId: '' });
-  const [secondaryTeacherId, setSecondaryTeacherId] = useState<string>('');
+  const [manageClass, setManageClass] = useState({ name: '', grade: '', teacherId: '', secondaryTeacherIds: [] as string[] });
+  const [secondarySelections, setSecondarySelections] = useState<Record<string, boolean>>({});
   const { toast } = useToast();
 
   useEffect(() => {
@@ -80,14 +81,18 @@ const AdminDashboard = forwardRef<HTMLDivElement, AdminDashboardProps>(({ curren
       toast({ title: "Error", description: "Please fill required fields", variant: "destructive" }); return;
     }
     const primary = teachers.find(t => t.id === manageClass.teacherId);
-    const secondary = teachers.find(t => t.id === manageClass.secondaryTeacherId);
+    const secondaryTeachers = manageClass.secondaryTeacherIds
+      .map(id => {
+        const t = teachers.find(tt => tt.id === id);
+        return t ? { id: t.id, name: t.name } : null;
+      })
+      .filter(Boolean) as { id: string; name: string }[];
     await dbUpdate(`classes/${selectedClassId}`, {
       name: manageClass.name,
       grade: manageClass.grade,
       teacherId: manageClass.teacherId,
       teacherName: primary?.name || 'Unassigned',
-      secondaryTeacherId: manageClass.secondaryTeacherId || '',
-      secondaryTeacherName: secondary?.name || ''
+      secondaryTeachers
     });
     setShowPanel(null);
     toast({ title: "Success", description: "Class updated successfully" });
@@ -95,14 +100,20 @@ const AdminDashboard = forwardRef<HTMLDivElement, AdminDashboardProps>(({ curren
 
   const handleAddSecondaryTeacher = async () => {
     if (!selectedClassId) return;
-    if (!secondaryTeacherId) {
-      toast({ title: "Error", description: "Please select a teacher", variant: "destructive" }); return;
-    }
-    const secondary = teachers.find(t => t.id === secondaryTeacherId);
-    await dbUpdate(`classes/${selectedClassId}`, {
-      secondaryTeacherId,
-      secondaryTeacherName: secondary?.name || ''
-    });
+    const selectedIds = Object.entries(secondarySelections).filter(([, v]) => v).map(([k]) => k);
+    if (selectedIds.length === 0) { toast({ title: "Error", description: "Please select at least one teacher", variant: "destructive" }); return; }
+    const secondaryTeachers = selectedIds
+      .map(id => {
+        const t = teachers.find(tt => tt.id === id);
+        return t ? { id: t.id, name: t.name } : null;
+      })
+      .filter(Boolean) as { id: string; name: string }[];
+    const existing = classes.find(c => c.id === selectedClassId)?.secondaryTeachers || [];
+    const merged = [
+      ...existing,
+      ...secondaryTeachers.filter(nt => !existing.some(et => et.id === nt.id))
+    ];
+    await dbUpdate(`classes/${selectedClassId}`, { secondaryTeachers: merged });
     setShowPanel(null);
     toast({ title: "Success", description: "Secondary teacher added" });
   };
@@ -431,7 +442,11 @@ const AdminDashboard = forwardRef<HTMLDivElement, AdminDashboardProps>(({ curren
                     <div>
                       <h4 className="font-semibold">{c.name}</h4>
                       <p className="text-sm text-muted-foreground">{c.teacherName}</p>
-                      <p className="text-xs text-muted-foreground">{c.secondaryTeacherName ? `Secondary: ${c.secondaryTeacherName}` : 'Secondary: None'}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {c.secondaryTeachers && c.secondaryTeachers.length > 0
+                          ? `Secondary: ${c.secondaryTeachers.map(st => st.name).join(', ')}`
+                          : 'Secondary: None'}
+                      </p>
                       <p className="text-xs text-muted-foreground">{students.filter(s => s.classId === c.id).length} students</p>
                     </div>
                   </div>
@@ -447,7 +462,7 @@ const AdminDashboard = forwardRef<HTMLDivElement, AdminDashboardProps>(({ curren
                             name: c.name,
                             grade: c.grade,
                             teacherId: c.teacherId,
-                            secondaryTeacherId: c.secondaryTeacherId || ''
+                            secondaryTeacherIds: (c.secondaryTeachers || []).map(st => st.id)
                           });
                           setShowPanel('manage-class');
                         }}
@@ -457,7 +472,9 @@ const AdminDashboard = forwardRef<HTMLDivElement, AdminDashboardProps>(({ curren
                       <DropdownMenuItem
                         onClick={() => {
                           setSelectedClassId(c.id);
-                          setSecondaryTeacherId(c.secondaryTeacherId || '');
+                          const initial: Record<string, boolean> = {};
+                          (c.secondaryTeachers || []).forEach(st => { initial[st.id] = true; });
+                          setSecondarySelections(initial);
                           setShowPanel('add-secondary');
                         }}
                       >
@@ -513,22 +530,44 @@ const AdminDashboard = forwardRef<HTMLDivElement, AdminDashboardProps>(({ curren
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-muted-foreground">Secondary Teacher</label>
-              <select className="w-full h-10 px-3 rounded-lg border border-input bg-background" value={manageClass.secondaryTeacherId} onChange={(e) => setManageClass({ ...manageClass, secondaryTeacherId: e.target.value })}>
-                <option value="">Select a teacher</option>
-                {teachers.map(t => <option key={t.id} value={t.id}>{t.name} ({t.subject})</option>)}
-              </select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {teachers.map(t => (
+                  <label key={t.id} className="flex items-center gap-2 p-2 rounded-lg border border-input">
+                    <Checkbox
+                      checked={manageClass.secondaryTeacherIds.includes(t.id)}
+                      onCheckedChange={(checked) => {
+                        setManageClass(prev => {
+                          const set = new Set(prev.secondaryTeacherIds);
+                          if (checked) set.add(t.id); else set.delete(t.id);
+                          return { ...prev, secondaryTeacherIds: Array.from(set) };
+                        });
+                      }}
+                    />
+                    <span className="text-sm">{t.name} ({t.subject})</span>
+                  </label>
+                ))}
+              </div>
             </div>
             <Button className="w-full bg-gradient-primary" onClick={handleUpdateClass}><Save className="w-4 h-4 mr-2" />Save Changes</Button>
           </div>
         </SlidePanel>
-        <SlidePanel isOpen={showPanel === 'add-secondary'} onClose={() => setShowPanel(null)} title="Add Secondary Teacher">
+        <SlidePanel isOpen={showPanel === 'add-secondary'} onClose={() => setShowPanel(null)} title="Add Secondary Teachers">
           <div className="space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-muted-foreground">Select Teacher</label>
-              <select className="w-full h-10 px-3 rounded-lg border border-input bg-background" value={secondaryTeacherId} onChange={(e) => setSecondaryTeacherId(e.target.value)}>
-                <option value="">Select a teacher</option>
-                {teachers.map(t => <option key={t.id} value={t.id}>{t.name} ({t.subject})</option>)}
-              </select>
+              <label className="text-sm font-medium text-muted-foreground">Select Teachers</label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {teachers.map(t => (
+                  <label key={t.id} className="flex items-center gap-2 p-2 rounded-lg border border-input">
+                    <Checkbox
+                      checked={!!secondarySelections[t.id]}
+                      onCheckedChange={(checked) => {
+                        setSecondarySelections(prev => ({ ...prev, [t.id]: !!checked }));
+                      }}
+                    />
+                    <span className="text-sm">{t.name} ({t.subject})</span>
+                  </label>
+                ))}
+              </div>
             </div>
             <Button className="w-full bg-gradient-primary" onClick={handleAddSecondaryTeacher}><Save className="w-4 h-4 mr-2" />Add</Button>
           </div>
