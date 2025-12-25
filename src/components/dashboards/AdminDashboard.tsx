@@ -27,6 +27,7 @@ interface Teacher { id: string; name: string; username: string; password: string
 interface Class { id: string; name: string; grade: string; teacherId: string; teacherName: string; secondaryTeachers?: { id: string; name: string }[]; }
 interface Student { id: string; name: string; username: string; password: string; classId: string; className: string; }
 interface Announcement { id: string; title: string; content: string; priority: 'normal' | 'important' | 'urgent'; createdAt: string; author: string; }
+interface Complaint { id: string; text: string; studentId: string; studentName?: string; classId?: string; className?: string; createdAt: string; date?: string; }
 
 interface AdminDashboardProps { currentPage: string; }
 
@@ -35,6 +36,7 @@ const AdminDashboard = forwardRef<HTMLDivElement, AdminDashboardProps>(({ curren
   const [classes, setClasses] = useState<Class[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [showPanel, setShowPanel] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [newTeacher, setNewTeacher] = useState({ name: '', username: '', password: '', subject: '' });
@@ -51,7 +53,18 @@ const AdminDashboard = forwardRef<HTMLDivElement, AdminDashboardProps>(({ curren
       dbListen('teachers', (data) => setTeachers(data ? Object.entries(data).map(([id, t]: [string, any]) => ({ id, ...t })) : [])),
       dbListen('classes', (data) => setClasses(data ? Object.entries(data).map(([id, c]: [string, any]) => ({ id, ...c })) : [])),
       dbListen('students', (data) => setStudents(data ? Object.entries(data).map(([id, s]: [string, any]) => ({ id, ...s })) : [])),
-      dbListen('announcements', (data) => setAnnouncements(data ? Object.entries(data).map(([id, a]: [string, any]) => ({ id, ...a })).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) : []))
+      dbListen('announcements', (data) => setAnnouncements(data ? Object.entries(data).map(([id, a]: [string, any]) => ({ id, ...a })).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) : [])),
+      dbListen('complaints', (data) => {
+        if (!data) { setComplaints([]); return; }
+        const list: Complaint[] = [];
+        Object.entries(data).forEach(([studentId, byDate]: [string, any]) => {
+          Object.entries(byDate).forEach(([date, c]: [string, any]) => {
+            list.push({ id: `${studentId}-${date}`, text: c.text, studentId, studentName: c.studentName, classId: c.classId, className: c.className, createdAt: c.createdAt, date });
+          });
+        });
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setComplaints(list);
+      })
     ];
     return () => unsubs.forEach(u => u());
   }, []);
@@ -158,6 +171,33 @@ const AdminDashboard = forwardRef<HTMLDivElement, AdminDashboardProps>(({ curren
     return (
       <div ref={ref}>
         <TimetablePanel currentPage={currentPage} />
+      </div>
+    );
+  }
+
+  if (currentPage === 'complaints') {
+    return (
+      <div ref={ref} className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div><h3 className="text-2xl font-display font-bold">Complaints</h3><p className="text-muted-foreground">Daily student complaints to Principal</p></div>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {complaints.map((c, i) => (
+            <Card key={c.id} className="hover-lift animate-fade-in" style={{ animationDelay: `${i * 0.03}s` }}>
+              <CardContent className="p-5">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="text-xs text-muted-foreground">{new Date(c.createdAt).toLocaleString()}</div>
+                    <h4 className="font-semibold">{c.studentName || c.studentId}</h4>
+                    <p className="text-sm text-muted-foreground">{c.className || c.classId}</p>
+                    <p className="mt-2">{c.text}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+          {complaints.length === 0 && <p className="text-muted-foreground">No complaints yet</p>}
+        </div>
       </div>
     );
   }

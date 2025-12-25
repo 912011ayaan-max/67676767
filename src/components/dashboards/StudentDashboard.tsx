@@ -1,12 +1,14 @@
 import React, { useState, useEffect, forwardRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
-import { dbListen, dbPush } from '@/lib/firebase';
+import { dbListen, dbPush, dbSet, dbGet } from '@/lib/firebase';
 import { 
   Calendar, ClipboardList, FileText, Bell, Check, X, 
   TrendingUp, Award, Clock, BookOpen, Megaphone, Upload,
-  CheckCircle2, AlertCircle, BarChart3, Star
+  CheckCircle2, AlertCircle, BarChart3, Star, MessageSquare, Send
 } from 'lucide-react';
 
 interface Homework { id: string; title: string; description: string; dueDate: string; classId: string; className: string; subject: string; createdAt: string; }
@@ -26,6 +28,12 @@ const StudentDashboard = forwardRef<HTMLDivElement, StudentDashboardProps>(({ cu
   const [grades, setGrades] = useState<GradeRecord[]>([]);
   const [schoolAnnouncements, setSchoolAnnouncements] = useState<Announcement[]>([]);
   const [classAnnouncements, setClassAnnouncements] = useState<ClassAnnouncement[]>([]);
+  const [classTeachers, setClassTeachers] = useState<{ id: string; name: string }[]>([]);
+  const [selectedTeacherId, setSelectedTeacherId] = useState<string>('');
+  const [messages, setMessages] = useState<Record<string, { id: string; text: string; from: 'student' | 'teacher'; createdAt: string }[]>>({});
+  const [newMessage, setNewMessage] = useState('');
+  const [myComplaints, setMyComplaints] = useState<{ id: string; text: string; date: string; createdAt: string }[]>([]);
+  const [complaintText, setComplaintText] = useState('');
 
   useEffect(() => {
     if (!user?.id) return;
@@ -35,7 +43,32 @@ const StudentDashboard = forwardRef<HTMLDivElement, StudentDashboardProps>(({ cu
       dbListen(`attendance/${user.id}`, (data) => setAttendance(data ? Object.entries(data).map(([id, a]: [string, any]) => ({ id, ...a })) : [])),
       dbListen(`grades/${user.id}`, (data) => setGrades(data ? Object.entries(data).map(([id, g]: [string, any]) => ({ id, ...g })).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()) : [])),
       dbListen('announcements', (data) => setSchoolAnnouncements(data ? Object.entries(data).map(([id, a]: [string, any]) => ({ id, ...a })).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) : [])),
-      dbListen('classAnnouncements', (data) => setClassAnnouncements(data ? Object.entries(data).map(([id, a]: [string, any]) => ({ id, ...a })).filter((a: ClassAnnouncement) => a.classId === user?.classId).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) : []))
+      dbListen('classAnnouncements', (data) => setClassAnnouncements(data ? Object.entries(data).map(([id, a]: [string, any]) => ({ id, ...a })).filter((a: ClassAnnouncement) => a.classId === user?.classId).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) : [])),
+      dbListen('classes', (data) => {
+        if (!user?.classId || !data) return;
+        const cls = Object.entries(data).map(([id, c]: [string, any]) => ({ id, ...c })).find((c: any) => c.id === user.classId);
+        if (!cls) return;
+        const teachersList: { id: string; name: string }[] = [];
+        if (cls.teacherId) teachersList.push({ id: cls.teacherId, name: cls.teacherName || 'Class Teacher' });
+        (cls.secondaryTeachers || []).forEach((st: any) => teachersList.push({ id: st.id, name: st.name }));
+        setClassTeachers(teachersList);
+        if (!selectedTeacherId && teachersList.length > 0) setSelectedTeacherId(teachersList[0].id);
+      }),
+      dbListen(`messages/${user.id}`, (data) => {
+        if (!data) { setMessages({}); return; }
+        const byTeacher: Record<string, any[]> = data;
+        const normalized: Record<string, { id: string; text: string; from: 'student' | 'teacher'; createdAt: string }[]> = {};
+        Object.entries(byTeacher).forEach(([tid, msgs]: [string, any]) => {
+          const arr = Object.entries(msgs).map(([id, m]: [string, any]) => ({ id, ...m })).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+          normalized[tid] = arr;
+        });
+        setMessages(normalized);
+      }),
+      dbListen(`complaints/${user.id}`, (data) => {
+        if (!data) { setMyComplaints([]); return; }
+        const list = Object.entries(data).map(([date, c]: [string, any]) => ({ id: date, text: c.text, date, createdAt: c.createdAt })).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setMyComplaints(list);
+      })
     ];
     return () => unsubs.forEach(u => u());
   }, [user?.id, user?.classId]);
@@ -203,6 +236,101 @@ const StudentDashboard = forwardRef<HTMLDivElement, StudentDashboardProps>(({ cu
             </CardContent>
           </Card>
         )}
+      </div>
+    );
+  }
+
+  if (currentPage === 'messages') {
+    const teacherOptions = classTeachers;
+    const chat = selectedTeacherId ? (messages[selectedTeacherId] || []) : [];
+    const handleSendMessage = async () => {
+      if (!selectedTeacherId || !newMessage.trim() || !user?.id) return;
+      const payload = { from: 'student' as const, text: newMessage.trim(), createdAt: new Date().toISOString(), studentId: user.id, teacherId: selectedTeacherId };
+      await dbPush(`messages/${user.id}/${selectedTeacherId}`, payload);
+      await dbPush(`messages/${selectedTeacherId}/${user.id}`, { ...payload, from: 'student' });
+      setNewMessage('');
+    };
+    return (
+      <div ref={ref} className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div><h3 className="text-2xl font-display font-bold">Messages</h3><p className="text-muted-foreground">Send a message to your teacher</p></div>
+        </div>
+        <Card className="shadow-xl border-0">
+          <CardHeader className="border-b border-border/50">
+            <CardTitle className="font-display flex items-center gap-2"><MessageSquare className="w-5 h-5 text-secondary" />Chat</CardTitle>
+          </CardHeader>
+          <CardContent className="p-5 space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">Teacher</label>
+              <select className="w-full h-10 px-3 rounded-lg border border-input bg-background" value={selectedTeacherId} onChange={(e) => setSelectedTeacherId(e.target.value)}>
+                {teacherOptions.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+            <div className="h-64 border rounded-xl p-3 bg-muted/30 overflow-auto space-y-2">
+              {chat.map(m => (
+                <div key={m.id} className={`max-w-[80%] p-2 rounded-lg ${m.from === 'student' ? 'bg-primary/10 ml-auto' : 'bg-secondary/10'}`}>
+                  <p className="text-sm">{m.text}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">{new Date(m.createdAt).toLocaleTimeString()}</p>
+                </div>
+              ))}
+              {chat.length === 0 && <p className="text-muted-foreground text-sm">No messages yet</p>}
+            </div>
+            <div className="flex gap-2">
+              <Input placeholder="Type your message..." value={newMessage} onChange={(e) => setNewMessage(e.target.value)} />
+              <Button className="bg-gradient-primary" onClick={handleSendMessage}><Send className="w-4 h-4 mr-2" />Send</Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (currentPage === 'complaints') {
+    const today = new Date().toISOString().split('T')[0];
+    const hasToday = myComplaints.some(c => c.date === today);
+    const handleSubmitComplaint = async () => {
+      if (!complaintText.trim() || !user?.id) return;
+      const dateKey = new Date().toISOString().split('T')[0];
+      const existing = await dbGet(`complaints/${user.id}/${dateKey}`);
+      if (existing) return;
+      const payload = { text: complaintText.trim(), studentId: user.id, studentName: user.name, classId: user.classId, className: user.className, createdAt: new Date().toISOString() };
+      await dbSet(`complaints/${user.id}/${dateKey}`, payload);
+      setComplaintText('');
+    };
+    return (
+      <div ref={ref} className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div><h3 className="text-2xl font-display font-bold">Complaints</h3><p className="text-muted-foreground">Submit one complaint per day to the Principal</p></div>
+        </div>
+        <Card className="shadow-xl border-0">
+          <CardHeader className="border-b border-border/50">
+            <CardTitle className="font-display flex items-center gap-2"><AlertCircle className="w-5 h-5 text-destructive" />Today’s Complaint</CardTitle>
+          </CardHeader>
+          <CardContent className="p-5 space-y-4">
+            {hasToday ? (
+              <p className="text-muted-foreground">You have already submitted a complaint today.</p>
+            ) : (
+              <>
+                <Textarea placeholder="Write your complaint..." rows={4} value={complaintText} onChange={(e) => setComplaintText(e.target.value)} />
+                <Button className="bg-gradient-primary" onClick={handleSubmitComplaint}><Send className="w-4 h-4 mr-2" />Submit</Button>
+              </>
+            )}
+          </CardContent>
+        </Card>
+        <Card className="shadow-xl border-0">
+          <CardHeader className="border-b border-border/50"><CardTitle className="font-display">My Complaints</CardTitle></CardHeader>
+          <CardContent className="p-5 space-y-3">
+            {myComplaints.map(c => (
+              <div key={c.id} className="p-4 rounded-xl bg-muted/30 border border-border/50">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">{new Date(c.createdAt).toLocaleDateString()}</p>
+                </div>
+                <p className="mt-2">{c.text}</p>
+              </div>
+            ))}
+            {myComplaints.length === 0 && <p className="text-muted-foreground text-sm">No complaints yet</p>}
+          </CardContent>
+        </Card>
       </div>
     );
   }

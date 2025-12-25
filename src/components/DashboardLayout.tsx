@@ -18,7 +18,9 @@ import {
   ChevronRight,
   Settings,
   BarChart3,
-  Clock
+  Clock,
+  MessageSquare,
+  AlertCircle
 } from 'lucide-react';
 
 interface NavItem {
@@ -50,6 +52,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, currentPage
           { label: 'Students', icon: <GraduationCap className="w-5 h-5" />, path: 'students' },
           { label: 'Timetable', icon: <Clock className="w-5 h-5" />, path: 'timetable' },
           { label: 'Analytics', icon: <BarChart3 className="w-5 h-5" />, path: 'reports' },
+          { label: 'Complaints', icon: <AlertCircle className="w-5 h-5" />, path: 'complaints' },
           { label: 'Settings', icon: <Settings className="w-5 h-5" />, path: 'settings' },
         ];
       case 'teacher':
@@ -71,6 +74,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, currentPage
           { label: 'Homework', icon: <ClipboardList className="w-5 h-5" />, path: 'homework' },
           { label: 'Grades', icon: <FileText className="w-5 h-5" />, path: 'grades' },
           { label: 'Announcements', icon: <Bell className="w-5 h-5" />, path: 'announcements' },
+          { label: 'Messages', icon: <MessageSquare className="w-5 h-5" />, path: 'messages' },
+          { label: 'Complaints', icon: <AlertCircle className="w-5 h-5" />, path: 'complaints' },
           { label: 'Settings', icon: <Settings className="w-5 h-5" />, path: 'settings' },
         ];
       default:
