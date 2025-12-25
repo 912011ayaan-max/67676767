@@ -63,6 +63,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, currentPage
           { label: 'Attendance', icon: <Calendar className="w-5 h-5" />, path: 'attendance' },
           { label: 'Homework', icon: <ClipboardList className="w-5 h-5" />, path: 'homework' },
           { label: 'Grades', icon: <FileText className="w-5 h-5" />, path: 'grades' },
+          { label: 'Messages', icon: <MessageSquare className="w-5 h-5" />, path: 'messages' },
           { label: 'Announcements', icon: <Megaphone className="w-5 h-5" />, path: 'announcements' },
           { label: 'Settings', icon: <Settings className="w-5 h-5" />, path: 'settings' },
         ];

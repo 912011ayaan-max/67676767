@@ -12,7 +12,7 @@ import SettingsPanel from './SettingsPanel';
 import { 
   Check, X, Plus, BookOpen, Calendar, FileText, ClipboardCheck, 
   Send, Users, Clock, AlertCircle, CheckCircle2, Megaphone, Trash2,
-  TrendingUp, UserCheck, UserX, ChevronDown, ChevronUp, Save
+  TrendingUp, UserCheck, UserX, ChevronDown, ChevronUp, Save, MessageSquare
 } from 'lucide-react';
 
 interface Student { id: string; name: string; classId: string; className: string; }
@@ -40,6 +40,9 @@ const TeacherDashboard = forwardRef<HTMLDivElement, TeacherDashboardProps>(({ cu
   const [attendance, setAttendance] = useState<Record<string, 'present' | 'absent'>>({});
   const [existingAttendance, setExistingAttendance] = useState<Record<string, AttendanceRecord>>({});
   const [gradeInput, setGradeInput] = useState<Record<string, string>>({});
+  const [selectedStudentId, setSelectedStudentId] = useState<string>('');
+  const [messages, setMessages] = useState<Record<string, { id: string; text: string; from: 'student' | 'teacher'; createdAt: string }[]>>({});
+  const [newReply, setNewReply] = useState('');
   const { toast } = useToast();
 
   useEffect(() => {
@@ -60,6 +63,25 @@ const TeacherDashboard = forwardRef<HTMLDivElement, TeacherDashboardProps>(({ cu
     ];
     return () => unsubs.forEach(u => u());
   }, [user?.id, selectedClass]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const unsub = dbListen(`messages/${user.id}`, (data) => {
+      if (!data) { setMessages({}); return; }
+      const byStudent: Record<string, any[]> = data;
+      const normalized: Record<string, { id: string; text: string; from: 'student' | 'teacher'; createdAt: string }[]> = {};
+      Object.entries(byStudent).forEach(([sid, msgs]: [string, any]) => {
+        const arr = Object.entries(msgs).map(([id, m]: [string, any]) => ({ id, ...m })).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        normalized[sid] = arr;
+      });
+      setMessages(normalized);
+      if (!selectedStudentId) {
+        const keys = Object.keys(normalized);
+        if (keys.length > 0) setSelectedStudentId(keys[0]);
+      }
+    });
+    return () => { if (typeof unsub === 'function') unsub(); };
+  }, [user?.id]);
 
   useEffect(() => {
     const loadAttendance = async () => {
@@ -87,6 +109,7 @@ const TeacherDashboard = forwardRef<HTMLDivElement, TeacherDashboardProps>(({ cu
   const getClassStudents = () => students.filter(s => s.classId === selectedClass);
   const myStudentCount = students.filter(s => myClasses.some(c => c.id === s.classId)).length;
   const myHomework = homework.filter(h => myClasses.some(c => c.id === h.classId));
+  const myStudents = students.filter(s => myClasses.some(c => c.id === s.classId));
 
   const handleAddHomework = async () => {
     if (!newHomework.title || !newHomework.dueDate || !newHomework.classId) {
@@ -167,6 +190,50 @@ const TeacherDashboard = forwardRef<HTMLDivElement, TeacherDashboardProps>(({ cu
 
   if (currentPage === 'timetable') return <div ref={ref}><TimetablePanel currentPage={currentPage} /></div>;
   if (currentPage === 'settings') return <div ref={ref}><SettingsPanel currentPage={currentPage} /></div>;
+
+  if (currentPage === 'messages') {
+    const chat = selectedStudentId ? (messages[selectedStudentId] || []) : [];
+    const handleSendReply = async () => {
+      if (!selectedStudentId || !newReply.trim() || !user?.id) return;
+      const payload = { from: 'teacher' as const, text: newReply.trim(), createdAt: new Date().toISOString(), teacherId: user.id, studentId: selectedStudentId, teacherName: user.name };
+      await dbPush(`messages/${user.id}/${selectedStudentId}`, payload);
+      await dbPush(`messages/${selectedStudentId}/${user.id}`, { ...payload, from: 'teacher' });
+      setNewReply('');
+    };
+    return (
+      <div ref={ref} className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div><h3 className="text-2xl font-display font-bold">Messages</h3><p className="text-muted-foreground">Reply to student messages</p></div>
+        </div>
+        <Card className="shadow-xl border-0">
+          <CardHeader className="border-b border-border/50">
+            <CardTitle className="font-display flex items-center gap-2"><MessageSquare className="w-5 h-5 text-secondary" />Chat</CardTitle>
+          </CardHeader>
+          <CardContent className="p-5 space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-muted-foreground">Student</label>
+              <select className="w-full h-10 px-3 rounded-lg border border-input bg-background" value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)}>
+                {myStudents.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div className="h-64 border rounded-xl p-3 bg-muted/30 overflow-auto space-y-2">
+              {chat.map(m => (
+                <div key={m.id} className={`max-w-[80%] p-2 rounded-lg ${m.from === 'teacher' ? 'bg-primary/10 ml-auto' : 'bg-secondary/10'}`}>
+                  <p className="text-sm">{m.text}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">{new Date(m.createdAt).toLocaleTimeString()}</p>
+                </div>
+              ))}
+              {chat.length === 0 && <p className="text-muted-foreground text-sm">No messages yet</p>}
+            </div>
+            <div className="flex gap-2">
+              <Input placeholder="Type your reply..." value={newReply} onChange={(e) => setNewReply(e.target.value)} />
+              <Button className="bg-gradient-primary" onClick={handleSendReply}><Send className="w-4 h-4 mr-2" />Send</Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (currentPage === 'dashboard') {
     return (
