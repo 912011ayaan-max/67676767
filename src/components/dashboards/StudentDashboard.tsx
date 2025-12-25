@@ -62,7 +62,9 @@ const StudentDashboard = forwardRef<HTMLDivElement, StudentDashboardProps>(({ cu
         const byTeacher: Record<string, any[]> = data;
         const normalized: Record<string, { id: string; text: string; from: 'student' | 'teacher'; createdAt: string }[]> = {};
         Object.entries(byTeacher).forEach(([tid, msgs]: [string, any]) => {
-          const arr = Object.entries(msgs).map(([id, m]: [string, any]) => ({ id, ...m })).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+          const arr = Object.entries(msgs)
+            .map(([id, m]: [string, any]) => ({ id, ...m }))
+            .sort((a, b) => (Date.parse(a.createdAt || '') || 0) - (Date.parse(b.createdAt || '') || 0));
           normalized[tid] = arr;
         });
         setMessages(normalized);
@@ -121,10 +123,25 @@ const StudentDashboard = forwardRef<HTMLDivElement, StudentDashboardProps>(({ cu
     </Card>
   );
 
+  useEffect(() => {
+    if (currentPage !== 'messages') return;
+    const tid = selectedTeacherId;
+    if (!tid) return;
+    const list = messages[tid] || [];
+    const latest = list[list.length - 1];
+    if (latest && latest.from === 'teacher') {
+      const seen = lastSeen[tid] ? new Date(lastSeen[tid]).getTime() : 0;
+      const ts = new Date(latest.createdAt).getTime();
+      if (ts > seen) {
+        const teacherName = classTeachers.find(t => t.id === tid)?.name || 'Teacher';
+        toast({ title: 'New message', description: `From ${teacherName}` });
+      }
+    }
+  }, [messages, selectedTeacherId, currentPage, lastSeen, classTeachers, toast]);
+
   if (currentPage === 'dashboard') {
     return (
       <div ref={ref} className="space-y-8">
-        {/* Welcome Banner */}
         <Card className="border-0 shadow-xl bg-gradient-primary overflow-hidden relative">
           <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxjaXJjbGUgY3g9IjMwIiBjeT0iMzAiIHI9IjIiIGZpbGw9InJnYmEoMjU1LDI1NSwyNTUsMC4xKSIvPjwvZz48L3N2Zz4=')] opacity-50"></div>
           <CardContent className="p-8 relative">
@@ -148,17 +165,7 @@ const StudentDashboard = forwardRef<HTMLDivElement, StudentDashboardProps>(({ cu
           </CardContent>
         </Card>
 
-        {/* Quick Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard title="Attendance" value={`${stats.percentage}%`} icon={TrendingUp} gradient="bg-gradient-primary" />
-          <StatCard title="Pending Tasks" value={pendingHomework.length} icon={ClipboardList} gradient="bg-gradient-gold" />
-          <StatCard title="Total Grades" value={grades.length} icon={Award} gradient="bg-gradient-success" />
-          <StatCard title="Days Present" value={stats.present} icon={Calendar} gradient="bg-gradient-warm" />
-        </div>
-
-        {/* Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Upcoming Homework */}
           <Card className="shadow-xl border-0 hover-lift">
             <CardHeader className="border-b border-border/50">
               <CardTitle className="font-display flex items-center gap-2"><ClipboardList className="w-5 h-5 text-secondary" />Upcoming Homework</CardTitle>
@@ -196,7 +203,6 @@ const StudentDashboard = forwardRef<HTMLDivElement, StudentDashboardProps>(({ cu
             </CardContent>
           </Card>
 
-          {/* Recent Grades */}
           <Card className="shadow-xl border-0 hover-lift">
             <CardHeader className="border-b border-border/50">
               <CardTitle className="font-display flex items-center gap-2"><Award className="w-5 h-5 text-primary" />Recent Grades</CardTitle>
@@ -218,7 +224,6 @@ const StudentDashboard = forwardRef<HTMLDivElement, StudentDashboardProps>(({ cu
           </Card>
         </div>
 
-        {/* Announcements */}
         {(schoolAnnouncements.length > 0 || classAnnouncements.length > 0) && (
           <Card className="shadow-xl border-0">
             <CardHeader className="border-b border-border/50">
@@ -251,29 +256,13 @@ const StudentDashboard = forwardRef<HTMLDivElement, StudentDashboardProps>(({ cu
     );
   }
 
-  useEffect(() => {
-    if (currentPage !== 'messages') return;
-    const tid = selectedTeacherId;
-    if (!tid) return;
-    const list = messages[tid] || [];
-    const latest = list[list.length - 1];
-    if (latest && latest.from === 'teacher') {
-      const seen = lastSeen[tid] ? new Date(lastSeen[tid]).getTime() : 0;
-      const ts = new Date(latest.createdAt).getTime();
-      if (ts > seen) {
-        const teacherName = classTeachers.find(t => t.id === tid)?.name || 'Teacher';
-        toast({ title: 'New message', description: `From ${teacherName}` });
-      }
-    }
-  }, [messages, selectedTeacherId, currentPage, lastSeen, classTeachers, toast]);
-
   if (currentPage === 'messages') {
     const teacherOptions = classTeachers;
     const chat = selectedTeacherId ? (messages[selectedTeacherId] || []) : [];
     const unreadCount = (tid: string) => {
-      const seen = lastSeen[tid] ? new Date(lastSeen[tid]).getTime() : 0;
+      const seen = Date.parse(lastSeen[tid] || '') || 0;
       const list = messages[tid] || [];
-      return list.filter(m => m.from === 'teacher' && new Date(m.createdAt).getTime() > seen).length;
+      return list.filter(m => m.from === 'teacher' && ((Date.parse(m.createdAt || '') || 0) > seen)).length;
     };
     const handleSendMessage = async () => {
       if (!selectedTeacherId || !newMessage.trim() || !user?.id) return;
@@ -303,9 +292,9 @@ const StudentDashboard = forwardRef<HTMLDivElement, StudentDashboardProps>(({ cu
                 const count = unreadCount(t.id);
                 return (
                   <button key={t.id} onClick={() => handleSelect(t.id)} className={`w-full flex items-center gap-3 p-3 rounded-lg border transition ${selectedTeacherId === t.id ? 'bg-muted/40 border-primary/30' : 'hover:bg-muted/30 border-border/50'}`}>
-                    <div className="w-10 h-10 rounded-xl bg-secondary/10 flex items-center justify-center"><span className="font-display font-bold">{t.name.charAt(0)}</span></div>
+                    <div className="w-10 h-10 rounded-xl bg-secondary/10 flex items-center justify-center"><span className="font-display font-bold">{(t.name || '?').charAt(0)}</span></div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{t.name}</p>
+                      <p className="font-medium truncate">{t.name || 'Unknown'}</p>
                       <p className="text-xs text-muted-foreground truncate">{last ? last.text : 'No messages'}</p>
                     </div>
                     {count > 0 && <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-destructive text-destructive-foreground">{count}</span>}

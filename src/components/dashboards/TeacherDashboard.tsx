@@ -72,7 +72,9 @@ const TeacherDashboard = forwardRef<HTMLDivElement, TeacherDashboardProps>(({ cu
       const byStudent: Record<string, any[]> = data;
       const normalized: Record<string, { id: string; text: string; from: 'student' | 'teacher'; createdAt: string }[]> = {};
       Object.entries(byStudent).forEach(([sid, msgs]: [string, any]) => {
-        const arr = Object.entries(msgs).map(([id, m]: [string, any]) => ({ id, ...m })).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        const arr = Object.entries(msgs)
+          .map(([id, m]: [string, any]) => ({ id, ...m }))
+          .sort((a, b) => (Date.parse(a.createdAt || '') || 0) - (Date.parse(b.createdAt || '') || 0));
         normalized[sid] = arr;
       });
       setMessages(normalized);
@@ -120,9 +122,9 @@ const TeacherDashboard = forwardRef<HTMLDivElement, TeacherDashboardProps>(({ cu
   const myHomework = homework.filter(h => myClasses.some(c => c.id === h.classId));
   const myStudents = students.filter(s => myClasses.some(c => c.id === s.classId));
   const unreadCount = (sid: string) => {
-    const seen = lastSeen[sid] ? new Date(lastSeen[sid]).getTime() : 0;
+    const seen = Date.parse(lastSeen[sid] || '') || 0;
     const list = messages[sid] || [];
-    return list.filter(m => m.from === 'student' && new Date(m.createdAt).getTime() > seen).length;
+    return list.filter(m => m.from === 'student' && ((Date.parse(m.createdAt || '') || 0) > seen)).length;
   };
 
   const handleAddHomework = async () => {
@@ -251,9 +253,9 @@ const TeacherDashboard = forwardRef<HTMLDivElement, TeacherDashboardProps>(({ cu
                 const count = unreadCount(s.id);
                 return (
                   <button key={s.id} onClick={() => handleSelect(s.id)} className={`w-full flex items-center gap-3 p-3 rounded-lg border transition ${selectedStudentId === s.id ? 'bg-muted/40 border-primary/30' : 'hover:bg-muted/30 border-border/50'}`}>
-                    <div className="w-10 h-10 rounded-xl bg-secondary/10 flex items-center justify-center"><span className="font-display font-bold">{s.name.charAt(0)}</span></div>
+                    <div className="w-10 h-10 rounded-xl bg-secondary/10 flex items-center justify-center"><span className="font-display font-bold">{(s.name || '?').charAt(0)}</span></div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{s.name}</p>
+                      <p className="font-medium truncate">{s.name || 'Unknown'}</p>
                       <p className="text-xs text-muted-foreground truncate">{last ? last.text : 'No messages'}</p>
                     </div>
                     {count > 0 && <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-destructive text-destructive-foreground">{count}</span>}
