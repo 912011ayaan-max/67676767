@@ -205,6 +205,22 @@ const TeacherDashboard = forwardRef<HTMLDivElement, TeacherDashboardProps>(({ cu
   if (currentPage === 'timetable') return <div ref={ref}><TimetablePanel currentPage={currentPage} /></div>;
   if (currentPage === 'settings') return <div ref={ref}><SettingsPanel currentPage={currentPage} /></div>;
 
+  useEffect(() => {
+    if (currentPage !== 'messages') return;
+    const sid = selectedStudentId;
+    if (!sid) return;
+    const list = messages[sid] || [];
+    const latest = list[list.length - 1];
+    if (latest && latest.from === 'student') {
+      const seen = lastSeen[sid] ? new Date(lastSeen[sid]).getTime() : 0;
+      const ts = new Date(latest.createdAt).getTime();
+      if (ts > seen) {
+        const studentName = myStudents.find(s => s.id === sid)?.name || 'Student';
+        toast({ title: 'New message', description: studentName });
+      }
+    }
+  }, [messages, selectedStudentId, currentPage, lastSeen, myStudents, toast]);
+
   if (currentPage === 'messages') {
     const chat = selectedStudentId ? (messages[selectedStudentId] || []) : [];
     const handleSendReply = async () => {
@@ -218,17 +234,6 @@ const TeacherDashboard = forwardRef<HTMLDivElement, TeacherDashboardProps>(({ cu
       setSelectedStudentId(sid);
       await dbSet(`messageLastSeen/${user?.id}/${sid}`, { seenAt: new Date().toISOString() });
     };
-    useEffect(() => {
-      const sid = selectedStudentId;
-      if (!sid) return;
-      const list = messages[sid] || [];
-      const latest = list[list.length - 1];
-      if (latest && latest.from === 'student') {
-        const seen = lastSeen[sid] ? new Date(lastSeen[sid]).getTime() : 0;
-        const ts = new Date(latest.createdAt).getTime();
-        if (ts > seen) toast({ title: 'New message', description: myStudents.find(s => s.id === sid)?.name || 'Student' });
-      }
-    }, [messages, selectedStudentId]);
     return (
       <div ref={ref} className="space-y-6">
         <div className="flex items-center justify-between">

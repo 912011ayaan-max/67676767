@@ -251,6 +251,22 @@ const StudentDashboard = forwardRef<HTMLDivElement, StudentDashboardProps>(({ cu
     );
   }
 
+  useEffect(() => {
+    if (currentPage !== 'messages') return;
+    const tid = selectedTeacherId;
+    if (!tid) return;
+    const list = messages[tid] || [];
+    const latest = list[list.length - 1];
+    if (latest && latest.from === 'teacher') {
+      const seen = lastSeen[tid] ? new Date(lastSeen[tid]).getTime() : 0;
+      const ts = new Date(latest.createdAt).getTime();
+      if (ts > seen) {
+        const teacherName = classTeachers.find(t => t.id === tid)?.name || 'Teacher';
+        toast({ title: 'New message', description: `From ${teacherName}` });
+      }
+    }
+  }, [messages, selectedTeacherId, currentPage, lastSeen, classTeachers, toast]);
+
   if (currentPage === 'messages') {
     const teacherOptions = classTeachers;
     const chat = selectedTeacherId ? (messages[selectedTeacherId] || []) : [];
@@ -270,17 +286,6 @@ const StudentDashboard = forwardRef<HTMLDivElement, StudentDashboardProps>(({ cu
       setSelectedTeacherId(tid);
       await dbSet(`messageLastSeen/${user?.id}/${tid}`, { seenAt: new Date().toISOString() });
     };
-    useEffect(() => {
-      const tid = selectedTeacherId;
-      if (!tid) return;
-      const list = messages[tid] || [];
-      const latest = list[list.length - 1];
-      if (latest && latest.from === 'teacher') {
-        const seen = lastSeen[tid] ? new Date(lastSeen[tid]).getTime() : 0;
-        const ts = new Date(latest.createdAt).getTime();
-        if (ts > seen) toast({ title: 'New message', description: `From ${teacherOptions.find(t => t.id === tid)?.name || 'Teacher'}` });
-      }
-    }, [messages, selectedTeacherId]);
     return (
       <div ref={ref} className="space-y-6">
         <div className="flex items-center justify-between">
