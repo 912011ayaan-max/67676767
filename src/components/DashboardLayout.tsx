@@ -1,4 +1,4 @@
-import React, { ReactNode, useState } from 'react';
+import React, { ReactNode, useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import crescentLogo from '@/assets/crescent-logo.jpg';
@@ -22,6 +22,7 @@ import {
   MessageSquare,
   AlertCircle
 } from 'lucide-react';
+import { dbListen } from '@/lib/firebase';
 
 interface NavItem {
   label: string;
@@ -40,6 +41,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, currentPage
   const { user, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [messagesBadge, setMessagesBadge] = useState<number>(0);
 
   const getNavItems = (): NavItem[] => {
     switch (user?.role) {
@@ -63,7 +65,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, currentPage
           { label: 'Attendance', icon: <Calendar className="w-5 h-5" />, path: 'attendance' },
           { label: 'Homework', icon: <ClipboardList className="w-5 h-5" />, path: 'homework' },
           { label: 'Grades', icon: <FileText className="w-5 h-5" />, path: 'grades' },
-          { label: 'Messages', icon: <MessageSquare className="w-5 h-5" />, path: 'messages' },
+          { label: 'Messages', icon: <MessageSquare className="w-5 h-5" />, path: 'messages', badge: messagesBadge || undefined },
           { label: 'Announcements', icon: <Megaphone className="w-5 h-5" />, path: 'announcements' },
           { label: 'Settings', icon: <Settings className="w-5 h-5" />, path: 'settings' },
         ];
@@ -75,7 +77,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, currentPage
           { label: 'Homework', icon: <ClipboardList className="w-5 h-5" />, path: 'homework' },
           { label: 'Grades', icon: <FileText className="w-5 h-5" />, path: 'grades' },
           { label: 'Announcements', icon: <Bell className="w-5 h-5" />, path: 'announcements' },
-          { label: 'Messages', icon: <MessageSquare className="w-5 h-5" />, path: 'messages' },
+          { label: 'Messages', icon: <MessageSquare className="w-5 h-5" />, path: 'messages', badge: messagesBadge || undefined },
           { label: 'Complaints', icon: <AlertCircle className="w-5 h-5" />, path: 'complaints' },
           { label: 'Settings', icon: <Settings className="w-5 h-5" />, path: 'settings' },
         ];
@@ -121,6 +123,33 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, currentPage
     day: 'numeric',
     year: 'numeric'
   });
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let msgs: Record<string, any[]> = {};
+    let seen: Record<string, string> = {};
+    const calc = () => {
+      let total = 0;
+      Object.entries(msgs).forEach(([peerId, list]) => {
+        const arr = Object.entries(list).map(([_, m]: [string, any]) => m);
+        const latest = arr.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        const seenAt = seen[peerId] ? new Date(seen[peerId]).getTime() : 0;
+        total += latest.filter((m: any) => {
+          const ts = new Date(m.createdAt).getTime();
+          const incoming = m.from === (user?.role === 'teacher' ? 'student' : 'teacher');
+          return incoming && ts > seenAt;
+        }).length;
+      });
+      setMessagesBadge(total);
+    };
+    const u1 = dbListen(`messages/${user.id}`, (data) => { msgs = data || {}; calc(); });
+    const u2 = dbListen(`messageLastSeen/${user.id}`, (data) => {
+      const map: Record<string, string> = {};
+      if (data) Object.entries(data).forEach(([peerId, v]: [string, any]) => { map[peerId] = typeof v === 'string' ? v : v?.seenAt || ''; });
+      seen = map; calc();
+    });
+    return () => { if (typeof u1 === 'function') u1(); if (typeof u2 === 'function') u2(); };
+  }, [user?.id, user?.role]);
 
   return (
     <div className="min-h-screen bg-background">

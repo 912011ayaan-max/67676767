@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { dbGet, dbPush, dbUpdate, dbListen, dbRemove } from '@/lib/firebase';
+import { dbGet, dbPush, dbUpdate, dbListen, dbRemove, dbSet } from '@/lib/firebase';
 import SlidePanel from '@/components/ui/SlidePanel';
 import TimetablePanel from './TimetablePanel';
 import SettingsPanel from './SettingsPanel';
@@ -43,6 +43,7 @@ const TeacherDashboard = forwardRef<HTMLDivElement, TeacherDashboardProps>(({ cu
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [messages, setMessages] = useState<Record<string, { id: string; text: string; from: 'student' | 'teacher'; createdAt: string }[]>>({});
   const [newReply, setNewReply] = useState('');
+  const [lastSeen, setLastSeen] = useState<Record<string, string>>({});
   const { toast } = useToast();
 
   useEffect(() => {
@@ -80,7 +81,15 @@ const TeacherDashboard = forwardRef<HTMLDivElement, TeacherDashboardProps>(({ cu
         if (keys.length > 0) setSelectedStudentId(keys[0]);
       }
     });
-    return () => { if (typeof unsub === 'function') unsub(); };
+    const unsubSeen = dbListen(`messageLastSeen/${user.id}`, (data) => {
+      if (!data) { setLastSeen({}); return; }
+      const map: Record<string, string> = {};
+      Object.entries(data).forEach(([peerId, v]: [string, any]) => {
+        map[peerId] = typeof v === 'string' ? v : v?.seenAt || '';
+      });
+      setLastSeen(map);
+    });
+    return () => { if (typeof unsub === 'function') unsub(); if (typeof unsubSeen === 'function') unsubSeen(); };
   }, [user?.id]);
 
   useEffect(() => {
@@ -110,6 +119,11 @@ const TeacherDashboard = forwardRef<HTMLDivElement, TeacherDashboardProps>(({ cu
   const myStudentCount = students.filter(s => myClasses.some(c => c.id === s.classId)).length;
   const myHomework = homework.filter(h => myClasses.some(c => c.id === h.classId));
   const myStudents = students.filter(s => myClasses.some(c => c.id === s.classId));
+  const unreadCount = (sid: string) => {
+    const seen = lastSeen[sid] ? new Date(lastSeen[sid]).getTime() : 0;
+    const list = messages[sid] || [];
+    return list.filter(m => m.from === 'student' && new Date(m.createdAt).getTime() > seen).length;
+  };
 
   const handleAddHomework = async () => {
     if (!newHomework.title || !newHomework.dueDate || !newHomework.classId) {
@@ -200,37 +214,71 @@ const TeacherDashboard = forwardRef<HTMLDivElement, TeacherDashboardProps>(({ cu
       await dbPush(`messages/${selectedStudentId}/${user.id}`, { ...payload, from: 'teacher' });
       setNewReply('');
     };
+    const handleSelect = async (sid: string) => {
+      setSelectedStudentId(sid);
+      await dbSet(`messageLastSeen/${user?.id}/${sid}`, { seenAt: new Date().toISOString() });
+    };
+    useEffect(() => {
+      const sid = selectedStudentId;
+      if (!sid) return;
+      const list = messages[sid] || [];
+      const latest = list[list.length - 1];
+      if (latest && latest.from === 'student') {
+        const seen = lastSeen[sid] ? new Date(lastSeen[sid]).getTime() : 0;
+        const ts = new Date(latest.createdAt).getTime();
+        if (ts > seen) toast({ title: 'New message', description: myStudents.find(s => s.id === sid)?.name || 'Student' });
+      }
+    }, [messages, selectedStudentId]);
     return (
       <div ref={ref} className="space-y-6">
         <div className="flex items-center justify-between">
           <div><h3 className="text-2xl font-display font-bold">Messages</h3><p className="text-muted-foreground">Reply to student messages</p></div>
         </div>
-        <Card className="shadow-xl border-0">
-          <CardHeader className="border-b border-border/50">
-            <CardTitle className="font-display flex items-center gap-2"><MessageSquare className="w-5 h-5 text-secondary" />Chat</CardTitle>
-          </CardHeader>
-          <CardContent className="p-5 space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-muted-foreground">Student</label>
-              <select className="w-full h-10 px-3 rounded-lg border border-input bg-background" value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)}>
-                {myStudents.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
-            <div className="h-64 border rounded-xl p-3 bg-muted/30 overflow-auto space-y-2">
-              {chat.map(m => (
-                <div key={m.id} className={`max-w-[80%] p-2 rounded-lg ${m.from === 'teacher' ? 'bg-primary/10 ml-auto' : 'bg-secondary/10'}`}>
-                  <p className="text-sm">{m.text}</p>
-                  <p className="text-[10px] text-muted-foreground mt-1">{new Date(m.createdAt).toLocaleTimeString()}</p>
-                </div>
-              ))}
-              {chat.length === 0 && <p className="text-muted-foreground text-sm">No messages yet</p>}
-            </div>
-            <div className="flex gap-2">
-              <Input placeholder="Type your reply..." value={newReply} onChange={(e) => setNewReply(e.target.value)} />
-              <Button className="bg-gradient-primary" onClick={handleSendReply}><Send className="w-4 h-4 mr-2" />Send</Button>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Card className="shadow-xl border-0">
+            <CardHeader className="border-b border-border/50">
+              <CardTitle className="font-display flex items-center gap-2"><MessageSquare className="w-5 h-5 text-secondary" />Chats</CardTitle>
+            </CardHeader>
+            <CardContent className="p-3 space-y-2">
+              {myStudents.map(s => {
+                const list = messages[s.id] || [];
+                const last = list[list.length - 1];
+                const count = unreadCount(s.id);
+                return (
+                  <button key={s.id} onClick={() => handleSelect(s.id)} className={`w-full flex items-center gap-3 p-3 rounded-lg border transition ${selectedStudentId === s.id ? 'bg-muted/40 border-primary/30' : 'hover:bg-muted/30 border-border/50'}`}>
+                    <div className="w-10 h-10 rounded-xl bg-secondary/10 flex items-center justify-center"><span className="font-display font-bold">{s.name.charAt(0)}</span></div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">{s.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">{last ? last.text : 'No messages'}</p>
+                    </div>
+                    {count > 0 && <span className="px-2 py-0.5 text-xs font-bold rounded-full bg-destructive text-destructive-foreground">{count}</span>}
+                  </button>
+                );
+              })}
+              {myStudents.length === 0 && <p className="text-muted-foreground text-sm">No students</p>}
+            </CardContent>
+          </Card>
+          <Card className="shadow-xl border-0 md:col-span-2">
+            <CardHeader className="border-b border-border/50">
+              <CardTitle className="font-display">{myStudents.find(s => s.id === selectedStudentId)?.name || 'Select a chat'}</CardTitle>
+            </CardHeader>
+            <CardContent className="p-5 space-y-4">
+              <div className="h-72 border rounded-xl p-3 bg-muted/30 overflow-auto space-y-2">
+                {chat.map(m => (
+                  <div key={m.id} className={`max-w-[80%] p-2 rounded-lg ${m.from === 'teacher' ? 'bg-primary/10 ml-auto' : 'bg-secondary/10'}`}>
+                    <p className="text-sm">{m.text}</p>
+                    <p className="text-[10px] text-muted-foreground mt-1">{new Date(m.createdAt).toLocaleTimeString()}</p>
+                  </div>
+                ))}
+                {chat.length === 0 && <p className="text-muted-foreground text-sm">No messages yet</p>}
+              </div>
+              <div className="flex gap-2">
+                <Input placeholder="Type your reply..." value={newReply} onChange={(e) => setNewReply(e.target.value)} />
+                <Button className="bg-gradient-primary" onClick={handleSendReply}><Send className="w-4 h-4 mr-2" />Send</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     );
   }
